@@ -14,6 +14,9 @@ import base64
 from datetime import UTC, datetime
 from typing import Any
 
+import pytest
+from pydantic import ValidationError
+
 from squire.connectors.base import ConnectorConfig, Cursor
 from squire.connectors.github import (
     SOURCE_TYPE_CODE,
@@ -246,3 +249,24 @@ def test_anonymous_when_no_token() -> None:
     connector.healthcheck()
 
     assert connector._client.requested == ["owner/name"]
+
+
+def test_missing_required_setting_fails_fast() -> None:
+    """Omitting the required repo is rejected at construction, not mid-run."""
+    with pytest.raises(ValidationError):
+        GithubConnector(ConnectorConfig(key="github", instance_id="gh", settings={}))
+
+
+def test_healthcheck_propagates_access_error() -> None:
+    """A failure to resolve the repository surfaces at healthcheck, before ingest."""
+
+    class _BoomGithub:
+        def get_repo(self, full_name: str) -> Any:
+            raise RuntimeError("401 Bad credentials")
+
+    connector = GithubConnector(
+        ConnectorConfig(key="github", instance_id="gh", settings={"repo": "owner/name"})
+    )
+    connector._client = _BoomGithub()
+    with pytest.raises(RuntimeError, match="Bad credentials"):
+        connector.healthcheck()

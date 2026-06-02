@@ -17,6 +17,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, ClassVar
 
+import pytest
+
 from squire.common.config import Settings
 from squire.common.deployment import load_connector_configs
 from squire.common.embeddings import EmbeddingClient
@@ -242,6 +244,46 @@ def test_rerun_adds_only_new_content() -> None:
     assert first.documents_indexed == 2
     assert second.documents_indexed == 0
     assert len(store.rows) == 2
+
+
+class ExplodingConnector:
+    """A connector whose document stream fails partway through a run."""
+
+    key: ClassVar[str] = "exploding"
+
+    def __init__(self, *, instance_id: str = "boom") -> None:
+        self.instance_id = instance_id
+
+    def healthcheck(self) -> None:
+        return None
+
+    def iter_documents(self, since: Cursor | None) -> Iterator[Document]:
+        yield _doc("partial")
+        raise RuntimeError("API error mid-iteration")
+
+    def iter_signals(self, since: Cursor | None) -> Iterator[Signal]:
+        return iter(())
+
+    def current_cursor(self) -> Cursor | None:
+        # If this were ever persisted after the failure, the next run would skip
+        # content. The orchestrator must not reach this far on a failed run.
+        return Cursor(value="advanced")
+
+
+def test_failure_mid_iteration_does_not_advance_cursor() -> None:
+    """A run that raises must leave the stored watermark untouched (resumable).
+
+    Otherwise a transient source error would advance the cursor past content that
+    was never successfully ingested, silently skipping it on the next run.
+    """
+    cursors = InMemoryCursorStore()
+    cursors.set("exploding", "boom", Cursor(value="original"))
+    orchestrator = _orchestrator(FakeVectorStore(), cursors)
+
+    with pytest.raises(RuntimeError, match="API error mid-iteration"):
+        orchestrator.run([ExplodingConnector()], mode=IngestionMode.LIVE)
+
+    assert cursors.get("exploding", "boom") == Cursor(value="original")
 
 
 def test_multiple_connectors_are_aggregated() -> None:

@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from squire.connectors.base import ConnectorConfig, Cursor
 from squire.connectors.filesystem import FilesystemConnector
@@ -129,3 +130,11 @@ def test_empty_directory_yields_no_cursor(tmp_path: Path) -> None:
     connector = _connector(tmp_path)
     assert list(connector.iter_documents(None)) == []
     assert connector.current_cursor() is None
+
+
+def test_missing_required_setting_fails_fast() -> None:
+    """Omitting the required root is rejected at construction, not mid-run."""
+    with pytest.raises(ValidationError):
+        FilesystemConnector(
+            ConnectorConfig(key="filesystem", instance_id="fs", settings={})
+        )
