@@ -10,7 +10,7 @@ description = "A pluggable platform for unifying and AI-assisting an open-source
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "AGPL-3.0-or-later" }
-authors = [{ name = "Squire maintainers" }]
+authors = [{ name = "Danyal Faheem" }]
 dependencies = [
     # Configuration & models
     "pydantic>=2.7",
