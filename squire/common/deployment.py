@@ -23,9 +23,10 @@ import os
 import re
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import yaml
+from pydantic import BaseModel, Field, ValidationError
 
 from squire.connectors.base import ConnectorConfig
 
@@ -131,3 +132,144 @@ def _expand(value: Any, env: Mapping[str, str]) -> Any:
     if isinstance(value, list):
         return [_expand(item, env) for item in value]
     return value
+
+
+# ---------------------------------------------------------------------------
+# Policy: taxonomy, routing, and priorities.
+#
+# The factory and the classifier are driven by three project-specific config
+# files — what categories exist, how a category routes to owners and a target
+# repository, and what the priority scheme is. The engine ships only the models
+# and loaders; the values themselves live in a deployment. None of the names here
+# is project-specific.
+# ---------------------------------------------------------------------------
+
+
+class Category(BaseModel):
+    """One category in the taxonomy. The description guides the classifier."""
+
+    name: str
+    description: str = ""
+
+
+class Taxonomy(BaseModel):
+    """The set of categories a signal may be sorted into."""
+
+    categories: list[Category]
+    #: Category to fall back to when a classifier proposes one outside the set;
+    #: defaults to the first category if not given.
+    default: str | None = None
+
+    @property
+    def names(self) -> list[str]:
+        """The category names, in declared order."""
+        return [c.name for c in self.categories]
+
+    @property
+    def fallback(self) -> str:
+        """The category to use when a proposed one is not recognised."""
+        if self.default and self.default in self.names:
+            return self.default
+        return self.names[0] if self.categories else "uncategorized"
+
+    def resolve(self, name: str) -> str:
+        """Return ``name`` if it is a known category, else the fallback."""
+        return name if name in self.names else self.fallback
+
+
+class Route(BaseModel):
+    """Where a category's work goes: which owners, in which repository."""
+
+    owners: list[str] = Field(default_factory=list)
+    repo: str
+
+    @property
+    def primary_owner(self) -> str:
+        """The first owner, or a generic placeholder when none are listed."""
+        return self.owners[0] if self.owners else "unassigned"
+
+
+class Routing(BaseModel):
+    """Maps each category to a :class:`Route`, with a required default."""
+
+    routes: dict[str, Route] = Field(default_factory=dict)
+    default: Route
+
+    def resolve(self, category: str) -> Route:
+        """Return the route for ``category``, or the default route."""
+        return self.routes.get(category, self.default)
+
+
+class Priority(BaseModel):
+    """One priority level: a key stored on the item and a label shown on it."""
+
+    key: str
+    label: str
+    description: str = ""
+
+
+class Priorities(BaseModel):
+    """The priority scheme plus optional guidance for the classifier."""
+
+    levels: list[Priority]
+    #: Priority key to fall back to; defaults to the first level if not given.
+    default: str | None = None
+    #: Free-text guidance appended to the classify prompt (e.g. "security is p0").
+    guidance: str = ""
+
+    @property
+    def keys(self) -> list[str]:
+        """The priority keys, in declared order."""
+        return [level.key for level in self.levels]
+
+    @property
+    def fallback(self) -> str:
+        """The priority key to use when a proposed one is not recognised."""
+        if self.default and self.default in self.keys:
+            return self.default
+        return self.keys[0] if self.levels else "unprioritized"
+
+    def resolve(self, key: str) -> str:
+        """Return ``key`` if it is a known priority, else the fallback."""
+        return key if key in self.keys else self.fallback
+
+    def label_for(self, key: str) -> str:
+        """Return the board label for a priority key (the key itself if unknown)."""
+        for level in self.levels:
+            if level.key == key:
+                return level.label
+        return key
+
+
+class DeploymentPolicy(BaseModel):
+    """The bundle of project-specific policy the factory and classifier consume."""
+
+    taxonomy: Taxonomy
+    routing: Routing
+    priorities: Priorities
+
+
+def load_policy(
+    deployment: str | Path,
+    *,
+    base: Path | None = None,
+    env: Mapping[str, str] | None = None,
+) -> DeploymentPolicy:
+    """Load taxonomy, routing, and priorities for a deployment."""
+    directory = _resolve_dir(deployment, base)
+    environment = os.environ if env is None else env
+    taxonomy = _load_model(directory / "taxonomy.yml", Taxonomy, environment)
+    routing = _load_model(directory / "routing.yml", Routing, environment)
+    priorities = _load_model(directory / "priorities.yml", Priorities, environment)
+    return DeploymentPolicy(taxonomy=taxonomy, routing=routing, priorities=priorities)
+
+
+_ModelT = TypeVar("_ModelT", bound=BaseModel)
+
+
+def _load_model(path: Path, model: type[_ModelT], env: Mapping[str, str]) -> _ModelT:
+    document = _read_yaml(path)
+    try:
+        return model.model_validate(_expand(document, env))
+    except ValidationError as exc:
+        raise DeploymentConfigError(f"invalid configuration in {path}: {exc}") from exc
