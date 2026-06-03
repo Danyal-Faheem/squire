@@ -13,6 +13,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
+from squire.common import models
 from squire.common.config import Settings
 from squire.common.schemas import Signal
 from squire.rag.brain import default_classifier
@@ -70,6 +73,26 @@ def _signal() -> Signal:
         content_hash="h1",
         created_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
+
+
+def _bare_runtime(embedding_dim: int) -> Runtime:
+    return Runtime(
+        Settings(embedding_dim=embedding_dim),
+        deployment="unused",
+        llm=make_llm(),
+        embedder=make_embedder(dim=4),
+    )
+
+
+def test_validate_embedding_dimension_accepts_match() -> None:
+    """A configured dimension equal to the schema's passes validation silently."""
+    _bare_runtime(models.EMBEDDING_DIM).validate_embedding_dimension()
+
+
+def test_validate_embedding_dimension_rejects_mismatch() -> None:
+    """A configured dimension that disagrees with the schema fails loudly."""
+    with pytest.raises(RuntimeError, match="EMBEDDING_DIM"):
+        _bare_runtime(models.EMBEDDING_DIM + 1).validate_embedding_dimension()
 
 
 def test_build_connectors_from_deployment(tmp_path: Path) -> None:

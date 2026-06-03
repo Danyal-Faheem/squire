@@ -21,6 +21,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from squire.classify.llm import LLMClassifier
+from squire.common import models
 from squire.common.config import Settings, get_settings
 from squire.common.deployment import (
     DeploymentConfigError,
@@ -56,6 +57,21 @@ class Runtime:
         )
         self._llm = llm or LLMClient(self._settings)
         self._embedder = embedder or EmbeddingClient(self._settings)
+
+    def validate_embedding_dimension(self) -> None:
+        """Fail loudly at startup if config disagrees with the schema's vector width.
+
+        The embedding dimension is baked into the ``chunks`` table; a configured
+        ``EMBEDDING_DIM`` that does not match it would write or query vectors the
+        column rejects. Catching the mismatch here turns a confusing mid-run database
+        error into a clear startup failure.
+        """
+        if self._settings.embedding_dim != models.EMBEDDING_DIM:
+            raise RuntimeError(
+                f"EMBEDDING_DIM is {self._settings.embedding_dim} but the schema's "
+                f"vector column has dimension {models.EMBEDDING_DIM}; they must match "
+                "(changing the embedding dimension requires a migration)."
+            )
 
     def build_connectors(self) -> list[Connector]:
         """Instantiate the deployment's activated connectors via the registry."""

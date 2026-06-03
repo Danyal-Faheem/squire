@@ -50,7 +50,9 @@ class DraftRequest(BaseModel):
 @lru_cache
 def _runtime() -> Runtime:
     """Build the composition root once and reuse it across requests."""
-    return Runtime()
+    runtime = Runtime()
+    runtime.validate_embedding_dimension()
+    return runtime
 
 
 def get_brain() -> Iterator[Brain]:

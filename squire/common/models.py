@@ -21,12 +21,12 @@ from pgvector.sqlalchemy import Vector
 from sqlalchemy import BigInteger, DateTime, ForeignKey, Text, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from squire.common.config import get_settings
-
-# The embedding column's width is fixed in the schema and must match EMBEDDING_DIM
-# (see the initial migration). Read it once from configuration; swapping to a model of
-# a different dimension requires a migration, per the embedding-seam caveat.
-_EMBEDDING_DIM = get_settings().embedding_dim
+#: The embedding column's width, fixed in the schema. This is a deliberate module
+#: constant rather than a read of configuration: importing the models must have no
+#: settings side effect. It must equal the migration's dimension and the configured
+#: ``EMBEDDING_DIM``; the composition root validates that at startup, and swapping to a
+#: model of a different dimension requires a migration (the embedding-seam caveat).
+EMBEDDING_DIM = 1024
 
 
 class Base(DeclarativeBase):
@@ -43,7 +43,7 @@ class Chunk(Base):
     source_url: Mapped[str] = mapped_column(Text)
     origin: Mapped[str | None] = mapped_column(Text, nullable=True)
     content: Mapped[str] = mapped_column(Text)
-    embedding: Mapped[list[float]] = mapped_column(Vector(_EMBEDDING_DIM))
+    embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIM))
     content_hash: Mapped[str] = mapped_column(Text, unique=True)
     indexed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

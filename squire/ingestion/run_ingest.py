@@ -67,6 +67,7 @@ def run(argv: Sequence[str] | None = None) -> IngestionResult:
     deployment = args.deployment or settings.squire_deployment
 
     runtime = Runtime(settings, deployment=deployment)
+    runtime.validate_embedding_dimension()
     connectors = runtime.build_connectors()
     if args.connectors:
         wanted = set(args.connectors)
