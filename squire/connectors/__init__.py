@@ -11,6 +11,7 @@ from __future__ import annotations
 # Importing the built-in connector modules triggers their registration via the
 # ``@register`` decorator. They are imported for that side effect.
 from squire.connectors import discourse as discourse  # noqa: F401
+from squire.connectors import docs_site as docs_site  # noqa: F401
 from squire.connectors import filesystem as filesystem  # noqa: F401
 from squire.connectors import github as github  # noqa: F401
 from squire.connectors.base import Connector, ConnectorConfig, Cursor, Document, Signal
