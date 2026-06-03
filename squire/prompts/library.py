@@ -22,6 +22,10 @@ from string import Template
 _DEFAULTS_DIR = Path(__file__).resolve().parent / "defaults"
 
 
+class PromptError(Exception):
+    """Raised when a prompt template is malformed or references an unknown placeholder."""
+
+
 class PromptLibrary:
     """Loads prompt templates, preferring a deployment's overrides over the defaults."""
 
@@ -36,8 +40,25 @@ class PromptLibrary:
         return self._cache[name]
 
     def render(self, name: str, /, **values: str) -> str:
-        """Render template ``name``, substituting ``$placeholder`` values."""
-        return Template(self.template(name)).safe_substitute(values)
+        """Render template ``name``, substituting ``$placeholder`` values.
+
+        Substitution is *strict*: a placeholder the caller did not provide — almost
+        always a typo in a deployment override, like ``$suggested_answr`` — fails
+        loudly here rather than silently leaking the literal ``$placeholder`` into the
+        prompt or work item. The error names the template and the offending placeholder.
+        """
+        template = Template(self.template(name))
+        try:
+            return template.substitute(values)
+        except KeyError as exc:
+            raise PromptError(
+                f"prompt template {name!r} uses unknown placeholder ${exc.args[0]} "
+                f"(provided: {sorted(values)}); check the deployment override"
+            ) from exc
+        except ValueError as exc:
+            raise PromptError(
+                f"prompt template {name!r} has invalid placeholder syntax: {exc}"
+            ) from exc
 
     def _load(self, name: str) -> str:
         if self._overrides_dir is not None:

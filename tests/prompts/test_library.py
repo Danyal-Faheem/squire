@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from squire.prompts import PromptLibrary
+from squire.prompts.library import PromptError
 
 
 def test_default_templates_render() -> None:
@@ -66,3 +67,25 @@ def test_unknown_template_is_a_clear_error() -> None:
     """Rendering a template that exists in neither place fails clearly."""
     with pytest.raises(KeyError):
         PromptLibrary().render("does_not_exist.txt")
+
+
+def test_typo_in_override_fails_loudly(tmp_path: Path) -> None:
+    """A typo'd placeholder in an override raises, naming template + placeholder."""
+    overrides = tmp_path / "prompts"
+    overrides.mkdir()
+    (overrides / "work_item_body.md").write_text(
+        "Summary: $summary\nReply: $suggested_answr", encoding="utf-8"
+    )
+    library = PromptLibrary(overrides)
+
+    with pytest.raises(PromptError) as info:
+        library.render(
+            "work_item_body.md",
+            summary="S",
+            suggested_answer="A",
+            background="b",
+            source="u",
+        )
+    message = str(info.value)
+    assert "work_item_body.md" in message
+    assert "suggested_answr" in message
