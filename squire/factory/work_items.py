@@ -31,6 +31,7 @@ from squire.classify.base import Classifier
 from squire.common.deployment import Priorities, Route, Routing
 from squire.common.schemas import Classification, Signal
 from squire.factory.store import NewTrackedItem, TrackedItemStore
+from squire.prompts import PromptLibrary
 from squire.rag.schemas import GroundedAnswer
 
 logger = logging.getLogger(__name__)
@@ -83,6 +84,7 @@ class WorkItemFactory:
         store: TrackedItemStore,
         routing: Routing,
         priorities: Priorities,
+        prompts: PromptLibrary | None = None,
         dry_run: bool = True,
     ) -> None:
         self._classifier = classifier
@@ -91,6 +93,7 @@ class WorkItemFactory:
         self._store = store
         self._routing = routing
         self._priorities = priorities
+        self._prompts = prompts or PromptLibrary()
         self._dry_run = dry_run
 
     def process(self, signal: Signal) -> FactoryResult:
@@ -164,7 +167,7 @@ class WorkItemFactory:
     ) -> FactoryResult:
         draft = self._drafter.draft(classification.suggested_title, signal.body)
         title = f"[{classification.category}] {classification.suggested_title}"
-        body = _compose_body(signal, draft)
+        body = self._compose_body(signal, draft)
         labels = [
             self._priorities.label_for(classification.priority_key),
             classification.category,
@@ -215,36 +218,26 @@ class WorkItemFactory:
             classification=classification,
         )
 
+    def _compose_body(self, signal: Signal, draft: GroundedAnswer) -> str:
+        """Compose the work-item body from the (overridable) body template."""
+        if draft.citations:
+            background = "\n".join(
+                f"- {c.source_url} (relevance {c.score:.2f})" for c in draft.citations
+            )
+        else:
+            background = "_No supporting sources were found in the knowledge base._"
+        return self._prompts.render(
+            "work_item_body.md",
+            summary=signal.title,
+            suggested_answer=draft.answer,
+            background=background,
+            source=signal.source_url,
+        )
+
 
 def _change_note(signal: Signal) -> str:
     """A brief note posted on a work item when its source has changed."""
     return (
         "The source for this item changed and has been re-synced from "
         f"{signal.source_url}."
-    )
-
-
-def _compose_body(signal: Signal, draft: GroundedAnswer) -> str:
-    """Compose the work-item body: summary, suggested answer, sources, origin link."""
-    if draft.citations:
-        background = "\n".join(
-            f"- {c.source_url} (relevance {c.score:.2f})" for c in draft.citations
-        )
-    else:
-        background = "_No supporting sources were found in the knowledge base._"
-
-    return "\n".join(
-        [
-            "**Summary**",
-            signal.title,
-            "",
-            "**Suggested answer**",
-            draft.answer,
-            "",
-            "**Background**",
-            background,
-            "",
-            "---",
-            f"Source: {signal.source_url}",
-        ]
     )

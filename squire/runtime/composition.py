@@ -29,6 +29,7 @@ from squire.common.deployment import (
     MissingDeploymentConfigError,
     load_connector_configs,
     load_policy,
+    resolve_deployment_dir,
 )
 from squire.common.embeddings import EmbeddingClient
 from squire.common.llm import LLMClient
@@ -40,6 +41,7 @@ from squire.factory.store import PgTrackedItemStore
 from squire.factory.work_items import WorkItemFactory
 from squire.ingestion.cursors import PgCursorStore
 from squire.ingestion.orchestrator import IngestionOrchestrator, SignalHandler
+from squire.prompts import PromptLibrary
 from squire.rag.brain import Brain, ClassifierFn, default_classifier
 
 logger = logging.getLogger(__name__)
@@ -62,6 +64,16 @@ class Runtime:
         )
         self._llm = llm or LLMClient(self._settings)
         self._embedder = embedder or EmbeddingClient(self._settings)
+        self._prompts = self._build_prompt_library()
+
+    def _build_prompt_library(self) -> PromptLibrary:
+        """Load prompt templates, layering the deployment's ``prompts/`` overrides."""
+        try:
+            directory = resolve_deployment_dir(self._deployment)
+        except MissingDeploymentConfigError:
+            return PromptLibrary()
+        overrides = directory / "prompts"
+        return PromptLibrary(overrides if overrides.is_dir() else None)
 
     def validate_embedding_dimension(self) -> None:
         """Fail loudly at startup if config disagrees with the schema's vector width.
@@ -97,7 +109,7 @@ class Runtime:
         except MissingDeploymentConfigError:
             logger.info("no deployment policy found; using the default classifier")
             return default_classifier
-        return LLMClassifier(self._llm, policy).classify
+        return LLMClassifier(self._llm, policy, prompts=self._prompts).classify
 
     def build_brain(self, session: Session) -> Brain:
         """Wire a brain over a request-scoped session and the shared clients."""
@@ -106,6 +118,7 @@ class Runtime:
             vector_store=PgVectorStore(session),
             llm=self._llm,
             classifier=self.classifier(),
+            prompts=self._prompts,
         )
 
     def build_board(self) -> Board:
@@ -125,12 +138,13 @@ class Runtime:
         """
         policy = load_policy(self._deployment)
         return WorkItemFactory(
-            classifier=LLMClassifier(self._llm, policy),
+            classifier=LLMClassifier(self._llm, policy, prompts=self._prompts),
             drafter=self.build_brain(session),
             board=self.build_board(),
             store=PgTrackedItemStore(session),
             routing=policy.routing,
             priorities=policy.priorities,
+            prompts=self._prompts,
             dry_run=self._settings.dry_run,
         )
 

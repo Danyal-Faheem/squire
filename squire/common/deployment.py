@@ -55,6 +55,14 @@ def deployment_dir(name: str, *, base: Path | None = None) -> Path:
     return (base or DEFAULT_DEPLOYMENTS_DIR) / name
 
 
+def resolve_deployment_dir(deployment: str | Path, *, base: Path | None = None) -> Path:
+    """Resolve a deployment name or path to its directory.
+
+    Raises :class:`MissingDeploymentConfigError` if the directory does not exist.
+    """
+    return _resolve_dir(deployment, base)
+
+
 def load_connector_configs(
     deployment: str | Path,
     *,

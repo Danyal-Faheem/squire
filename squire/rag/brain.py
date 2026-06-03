@@ -21,6 +21,7 @@ from squire.common.embeddings import EmbeddingClient
 from squire.common.llm import LLMClient
 from squire.common.schemas import Classification, Signal
 from squire.common.vectorstore import VectorStore
+from squire.prompts import PromptLibrary
 from squire.rag.generator import Generator
 from squire.rag.retriever import Retriever
 from squire.rag.schemas import GroundedAnswer
@@ -57,10 +58,11 @@ class Brain:
         vector_store: VectorStore,
         llm: LLMClient,
         classifier: ClassifierFn = default_classifier,
+        prompts: PromptLibrary | None = None,
         max_tokens: int = 1024,
     ) -> None:
         self._retriever = Retriever(embedder, vector_store)
-        self._generator = Generator(llm, max_tokens=max_tokens)
+        self._generator = Generator(llm, prompts=prompts, max_tokens=max_tokens)
         self._classifier = classifier
 
     def query(

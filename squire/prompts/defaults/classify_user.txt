@@ -1,0 +1,8 @@
+CATEGORIES:
+$categories
+
+PRIORITIES:
+$priorities
+
+${guidance}ITEM:
+$item

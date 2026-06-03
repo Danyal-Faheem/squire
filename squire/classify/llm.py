@@ -22,25 +22,30 @@ from collections.abc import Iterable
 from squire.common.deployment import DeploymentPolicy
 from squire.common.llm import ChatMessage, LLMClient
 from squire.common.schemas import Classification, Signal
+from squire.prompts import PromptLibrary
 
 logger = logging.getLogger(__name__)
 
-_SYSTEM = (
-    "You are a triage assistant for a software project's maintainers. Given an "
-    "incoming item, choose exactly one category and one priority from the lists "
-    "provided, and write a short, specific title (under ~80 characters). Respond with "
-    "a single JSON object and nothing else, of the form "
-    '{"category": "<name>", "priority": "<key>", "title": "<title>"}. '
-    "Choose only from the listed category names and priority keys."
-)
-
 
 class LLMClassifier:
-    """A :class:`~squire.classify.base.Classifier` that asks an LLM to triage."""
+    """A :class:`~squire.classify.base.Classifier` that asks an LLM to triage.
 
-    def __init__(self, llm: LLMClient, policy: DeploymentPolicy) -> None:
+    The prompt wording comes from the :class:`~squire.prompts.PromptLibrary` (the
+    ``classify_*`` templates), so a deployment can retune it; the bounding to the
+    configured categories and priorities, and the safe-default fallback, are enforced
+    here in code regardless.
+    """
+
+    def __init__(
+        self,
+        llm: LLMClient,
+        policy: DeploymentPolicy,
+        *,
+        prompts: PromptLibrary | None = None,
+    ) -> None:
         self._llm = llm
         self._policy = policy
+        self._prompts = prompts or PromptLibrary()
 
     def classify(self, signal: Signal) -> Classification:
         """Classify a signal, falling back to safe defaults on any uncertainty."""
@@ -63,33 +68,29 @@ class LLMClassifier:
 
     def _messages(self, signal: Signal) -> list[ChatMessage]:
         return [
-            {"role": "system", "content": _SYSTEM},
+            {"role": "system", "content": self._prompts.render("classify_system.txt")},
             {"role": "user", "content": self._user_prompt(signal)},
         ]
 
     def _user_prompt(self, signal: Signal) -> str:
-        parts = [
-            "CATEGORIES:",
-            _bullets(
-                f"{c.name}: {c.description}" if c.description else c.name
-                for c in self._policy.taxonomy.categories
-            ),
-            "",
-            "PRIORITIES:",
-            _bullets(
-                f"{p.key}: {p.description}" if p.description else p.key
-                for p in self._policy.priorities.levels
-            ),
-        ]
+        categories = _bullets(
+            f"{c.name}: {c.description}" if c.description else c.name
+            for c in self._policy.taxonomy.categories
+        )
+        priorities = _bullets(
+            f"{p.key}: {p.description}" if p.description else p.key
+            for p in self._policy.priorities.levels
+        )
         guidance = self._policy.priorities.guidance.strip()
-        if guidance:
-            parts += ["", f"PRIORITY GUIDANCE: {guidance}"]
-        parts += [
-            "",
-            "ITEM:",
-            signal.title if not signal.body else f"{signal.title}\n\n{signal.body}",
-        ]
-        return "\n".join(parts)
+        guidance_block = f"PRIORITY GUIDANCE: {guidance}\n\n" if guidance else ""
+        item = signal.title if not signal.body else f"{signal.title}\n\n{signal.body}"
+        return self._prompts.render(
+            "classify_user.txt",
+            categories=categories,
+            priorities=priorities,
+            guidance=guidance_block,
+            item=item,
+        )
 
 
 def _bullets(lines: Iterable[str]) -> str:

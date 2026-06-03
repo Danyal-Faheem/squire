@@ -10,7 +10,10 @@ the factory).
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from squire.factory.work_items import FactoryOutcome, WorkItemFactory
+from squire.prompts import PromptLibrary
 from tests.factory._support import (
     FakeBoard,
     FakeDrafter,
@@ -168,6 +171,30 @@ def test_classifier_swap_changes_output_with_no_factory_change() -> None:
     assert created.repo == "acme/fallback"
     assert created.assignees == ["maintainers"]
     assert created.labels == ["priority: normal", "question"]
+
+
+def test_body_uses_an_overridden_template(tmp_path: Path) -> None:
+    """A deployment's work-item body override changes what the factory creates."""
+    overrides = tmp_path / "prompts"
+    overrides.mkdir()
+    (overrides / "work_item_body.md").write_text(
+        "TICKET // $summary // $suggested_answer", encoding="utf-8"
+    )
+    board = FakeBoard()
+    factory = WorkItemFactory(
+        classifier=StubClassifier(classification()),
+        drafter=FakeDrafter(answer="Try restarting."),
+        board=board,
+        store=InMemoryTrackedItemStore(),
+        routing=routing(),
+        priorities=priorities(),
+        prompts=PromptLibrary(overrides),
+        dry_run=False,
+    )
+
+    factory.process(signal())
+
+    assert board.created[0].body == "TICKET // Login fails // Try restarting."
 
 
 def test_unsupported_draft_still_creates_item_with_note() -> None:
