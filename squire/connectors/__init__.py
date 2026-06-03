@@ -14,6 +14,7 @@ from squire.connectors import discourse as discourse  # noqa: F401
 from squire.connectors import docs_site as docs_site  # noqa: F401
 from squire.connectors import filesystem as filesystem  # noqa: F401
 from squire.connectors import github as github  # noqa: F401
+from squire.connectors import pdf as pdf  # noqa: F401
 from squire.connectors.base import Connector, ConnectorConfig, Cursor, Document, Signal
 from squire.connectors.registry import (
     ConnectorRegistryError,

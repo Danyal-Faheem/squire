@@ -28,6 +28,8 @@ dependencies = [
     "alembic>=1.13",
     # RAG
     "llama-index-core>=0.11",
+    # Structure-preserving PDF extraction (pdf connector)
+    "pymupdf4llm>=0.0.17",
     # Web service for the brain
     "fastapi>=0.111",
     "uvicorn[standard]>=0.30",
