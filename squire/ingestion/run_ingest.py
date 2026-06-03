@@ -60,13 +60,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def run(argv: Sequence[str] | None = None) -> IngestionResult:
-    """Parse arguments, build collaborators, and run ingestion."""
+def run(
+    argv: Sequence[str] | None = None, *, runtime: Runtime | None = None
+) -> IngestionResult:
+    """Parse arguments, build collaborators, and run ingestion.
+
+    ``runtime`` is injectable so tests can drive the entrypoint with fake clients;
+    in production it is built from the environment and the selected deployment.
+    """
     args = build_arg_parser().parse_args(argv)
     settings = get_settings()
     deployment = args.deployment or settings.squire_deployment
 
-    runtime = Runtime(settings, deployment=deployment)
+    runtime = runtime or Runtime(settings, deployment=deployment)
     runtime.validate_embedding_dimension()
     connectors = runtime.build_connectors()
     if args.connectors:
@@ -80,7 +86,10 @@ def run(argv: Sequence[str] | None = None) -> IngestionResult:
         connector.healthcheck()
 
     with session_scope() as session:
-        orchestrator = runtime.build_orchestrator(session)
+        # When a deployment policy exists, new signals become board items via the
+        # factory; otherwise they are merely observed. The composition root decides.
+        handler = runtime.build_signal_handler(session)
+        orchestrator = runtime.build_orchestrator(session, signal_handler=handler)
         result = orchestrator.run(connectors, mode=args.mode)
 
     logger.info(

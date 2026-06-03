@@ -20,6 +20,8 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
+from squire.board.base import Board
+from squire.board.github import GitHubBoard
 from squire.classify.llm import LLMClassifier
 from squire.common import models
 from squire.common.config import Settings, get_settings
@@ -30,9 +32,12 @@ from squire.common.deployment import (
 )
 from squire.common.embeddings import EmbeddingClient
 from squire.common.llm import LLMClient
+from squire.common.schemas import Signal
 from squire.common.vectorstore import PgVectorStore
 from squire.connectors import registry
 from squire.connectors.base import Connector
+from squire.factory.store import PgTrackedItemStore
+from squire.factory.work_items import WorkItemFactory
 from squire.ingestion.cursors import PgCursorStore
 from squire.ingestion.orchestrator import IngestionOrchestrator, SignalHandler
 from squire.rag.brain import Brain, ClassifierFn, default_classifier
@@ -103,6 +108,50 @@ class Runtime:
             classifier=self.classifier(),
         )
 
+    def build_board(self) -> Board:
+        """Build the configured board backend, honouring the dry-run flag.
+
+        Live writes require GitHub credentials (the App-installation token flow is a
+        deferred wiring detail); under dry-run — the default — the board performs no
+        external write, so no token is needed.
+        """
+        return GitHubBoard(dry_run=self._settings.dry_run)
+
+    def build_factory(self, session: Session) -> WorkItemFactory:
+        """Wire the work-item factory over a session.
+
+        Requires a deployment policy (it supplies the routing and priority scheme the
+        factory needs); raises :class:`MissingDeploymentConfigError` when absent.
+        """
+        policy = load_policy(self._deployment)
+        return WorkItemFactory(
+            classifier=LLMClassifier(self._llm, policy),
+            drafter=self.build_brain(session),
+            board=self.build_board(),
+            store=PgTrackedItemStore(session),
+            routing=policy.routing,
+            priorities=policy.priorities,
+            dry_run=self._settings.dry_run,
+        )
+
+    def build_signal_handler(self, session: Session) -> SignalHandler | None:
+        """Return a factory-backed signal handler, or ``None`` to observe only.
+
+        This is the composition root's "turn signals into board items" decision: when
+        a deployment policy exists, new signals are processed by the work-item factory
+        into board items; without one — a legitimate early-phase state — it returns
+        ``None`` so the orchestrator's default observe-only handler is used. A policy
+        that is present but malformed propagates and fails loudly.
+        """
+        try:
+            factory = self.build_factory(session)
+        except MissingDeploymentConfigError:
+            logger.info(
+                "no deployment policy; observing signals without creating board items"
+            )
+            return None
+        return _factory_signal_handler(factory)
+
     def build_orchestrator(
         self, session: Session, *, signal_handler: SignalHandler | None = None
     ) -> IngestionOrchestrator:
@@ -113,3 +162,18 @@ class Runtime:
             cursors=PgCursorStore(session),
             signal_handler=signal_handler,
         )
+
+
+def _factory_signal_handler(factory: WorkItemFactory) -> SignalHandler:
+    """Adapt the factory into the orchestrator's signal-handler shape."""
+
+    def handle(signal: Signal) -> None:
+        result = factory.process(signal)
+        logger.info(
+            "factory outcome %s for signal %s (board item %s)",
+            result.outcome,
+            signal.source_id,
+            result.board_item_ref,
+        )
+
+    return handle

@@ -18,7 +18,9 @@ config = context.config
 config.set_main_option("sqlalchemy.url", get_settings().database_url)
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers=False so applying migrations (especially in-process,
+    # as the test fixtures do) does not silently disable the application's loggers.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # Raw-SQL migrations (no ORM metadata autogenerate) for the initial schema, so
 # target_metadata stays None.
