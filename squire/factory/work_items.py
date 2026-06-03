@@ -128,7 +128,9 @@ class WorkItemFactory:
     ) -> FactoryResult:
         if self._dry_run:
             logger.info(
-                "[dry-run] would update tracked item %d after source change", item_id
+                "[dry-run] would update tracked item %d and note the change on %s",
+                item_id,
+                board_item_ref,
             )
             return FactoryResult(
                 outcome=FactoryOutcome.DRY_RUN,
@@ -143,6 +145,10 @@ class WorkItemFactory:
             priority=classification.priority_key,
             assigned_owner=classification.owner,
         )
+        # Reflect the change on the board item itself, not only the ledger, so a
+        # maintainer watching the item sees that its source moved.
+        if board_item_ref is not None:
+            self._board.comment(board_item_ref, _change_note(signal))
         return FactoryResult(
             outcome=FactoryOutcome.UPDATED,
             tracked_item_id=item_id,
@@ -208,6 +214,14 @@ class WorkItemFactory:
             title=title,
             classification=classification,
         )
+
+
+def _change_note(signal: Signal) -> str:
+    """A brief note posted on a work item when its source has changed."""
+    return (
+        "The source for this item changed and has been re-synced from "
+        f"{signal.source_url}."
+    )
 
 
 def _compose_body(signal: Signal, draft: GroundedAnswer) -> str:

@@ -108,6 +108,34 @@ def test_changed_signal_updates_without_duplicating() -> None:
     assert tracked.content_hash == "h2"
 
 
+def test_changed_signal_is_reflected_on_the_board_item() -> None:
+    """A change posts a note on the board item, not only in the ledger."""
+    board = FakeBoard()
+    factory = _factory(board=board, store=InMemoryTrackedItemStore())
+
+    created = factory.process(signal(content_hash="h1"))
+    factory.process(signal(content_hash="h2", title="Login fails (still)"))
+
+    assert board.comments  # the change was reflected on the item
+    ref, note = board.comments[0]
+    assert ref == created.board_item_ref
+    assert "changed" in note.lower()
+
+
+def test_dry_run_change_posts_no_comment() -> None:
+    """Under dry-run, a detected change posts nothing to the board."""
+    store = InMemoryTrackedItemStore()
+    # Seed an existing tracked item so the next process is an update, not a create.
+    _factory(store=store, dry_run=False).process(signal(content_hash="h1"))
+
+    board = FakeBoard()
+    dry = _factory(board=board, store=store, dry_run=True)
+    result = dry.process(signal(content_hash="h2"))
+
+    assert result.outcome is FactoryOutcome.DRY_RUN
+    assert board.comments == []
+
+
 def test_dry_run_performs_no_writes() -> None:
     """With dry-run on, nothing reaches the board and nothing is persisted."""
     board = FakeBoard()
