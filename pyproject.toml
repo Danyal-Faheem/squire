@@ -16,8 +16,9 @@ dependencies = [
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
     "pyyaml>=6.0",
-    # HTTP
+    # HTTP & HTML parsing (forum and docs-site connectors)
     "httpx>=0.27",
+    "beautifulsoup4>=4.12",
     # LLM access via any OpenAI-compatible endpoint
     "openai>=1.40",
     # Data layer: PostgreSQL + pgvector + ORM + migrations
