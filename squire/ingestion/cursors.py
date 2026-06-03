@@ -18,9 +18,11 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from sqlalchemy import text
+from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from squire.common.models import ConnectorCursor
 from squire.connectors.base import Cursor
 
 
@@ -47,29 +49,28 @@ class PgCursorStore:
         self._session = session
 
     def get(self, connector_key: str, instance_id: str) -> Cursor | None:
-        row = self._session.execute(
-            text(
-                """
-                SELECT last_cursor
-                FROM connector_cursors
-                WHERE connector_key = :key AND instance_id = :instance
-                """
-            ),
-            {"key": connector_key, "instance": instance_id},
+        value = self._session.execute(
+            select(ConnectorCursor.last_cursor).where(
+                ConnectorCursor.connector_key == connector_key,
+                ConnectorCursor.instance_id == instance_id,
+            )
         ).scalar_one_or_none()
-        if row is None:
-            return None
-        return Cursor(value=row)
+        return None if value is None else Cursor(value=value)
 
     def set(self, connector_key: str, instance_id: str, cursor: Cursor) -> None:
-        self._session.execute(
-            text(
-                """
-                INSERT INTO connector_cursors (connector_key, instance_id, last_cursor)
-                VALUES (:key, :instance, :cursor)
-                ON CONFLICT (connector_key, instance_id)
-                DO UPDATE SET last_cursor = :cursor, updated_at = now()
-                """
-            ),
-            {"key": connector_key, "instance": instance_id, "cursor": cursor.value},
+        statement = (
+            pg_insert(ConnectorCursor)
+            .values(
+                connector_key=connector_key,
+                instance_id=instance_id,
+                last_cursor=cursor.value,
+            )
+            .on_conflict_do_update(
+                index_elements=[
+                    ConnectorCursor.connector_key,
+                    ConnectorCursor.instance_id,
+                ],
+                set_={"last_cursor": cursor.value, "updated_at": func.now()},
+            )
         )
+        self._session.execute(statement)

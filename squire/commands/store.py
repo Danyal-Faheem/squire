@@ -12,8 +12,9 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from sqlalchemy import text
 from sqlalchemy.orm import Session
+
+from squire.common import models
 
 
 class CommandStore(Protocol):
@@ -57,23 +58,16 @@ class PgCommandStore:
         command: str,
         payload: str,
     ) -> None:
-        self._session.execute(
-            text(
-                """
-                INSERT INTO command_log (
-                    tracked_item_id, surface, actor, command, payload
-                )
-                VALUES (:tracked_item_id, :surface, :actor, :command, :payload)
-                """
-            ),
-            {
-                "tracked_item_id": tracked_item_id,
-                "surface": surface,
-                "actor": actor,
-                "command": command,
-                "payload": payload,
-            },
+        self._session.add(
+            models.CommandLog(
+                tracked_item_id=tracked_item_id,
+                surface=surface,
+                actor=actor,
+                command=command,
+                payload=payload,
+            )
         )
+        self._session.flush()
 
     def queue_agent_request(
         self,
@@ -82,20 +76,11 @@ class PgCommandStore:
         requested_by: str,
         surface: str,
     ) -> int:
-        new_id = self._session.execute(
-            text(
-                """
-                INSERT INTO agent_requests (
-                    tracked_item_id, requested_by, surface, status
-                )
-                VALUES (:tracked_item_id, :requested_by, :surface, 'queued')
-                RETURNING id
-                """
-            ),
-            {
-                "tracked_item_id": tracked_item_id,
-                "requested_by": requested_by,
-                "surface": surface,
-            },
-        ).scalar_one()
-        return int(new_id)
+        request = models.AgentRequest(
+            tracked_item_id=tracked_item_id,
+            requested_by=requested_by,
+            surface=surface,
+        )
+        self._session.add(request)
+        self._session.flush()  # populate the generated primary key
+        return request.id

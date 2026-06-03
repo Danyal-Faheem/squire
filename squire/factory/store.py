@@ -17,8 +17,10 @@ from datetime import datetime
 from typing import Protocol
 
 from pydantic import BaseModel
-from sqlalchemy import text
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
+
+from squire.common import models
 
 
 class TrackedItem(BaseModel):
@@ -82,42 +84,23 @@ class PgTrackedItemStore:
         self._session = session
 
     def get(self, source_type: str, source_id: str) -> TrackedItem | None:
-        row = (
-            self._session.execute(
-                text(
-                    """
-                SELECT id, source_type, source_id, source_url, content_hash,
-                       board_item_ref, category, priority, assigned_owner,
-                       status, created_at
-                FROM tracked_items
-                WHERE source_type = :source_type AND source_id = :source_id
-                """
-                ),
-                {"source_type": source_type, "source_id": source_id},
+        row = self._session.execute(
+            select(models.TrackedItem).where(
+                models.TrackedItem.source_type == source_type,
+                models.TrackedItem.source_id == source_id,
             )
-            .mappings()
-            .one_or_none()
+        ).scalar_one_or_none()
+        return (
+            None
+            if row is None
+            else TrackedItem.model_validate(row, from_attributes=True)
         )
-        return TrackedItem(**row) if row is not None else None
 
     def create(self, item: NewTrackedItem) -> int:
-        new_id = self._session.execute(
-            text(
-                """
-                INSERT INTO tracked_items (
-                    source_type, source_id, source_url, content_hash,
-                    board_item_ref, category, priority, assigned_owner, status
-                )
-                VALUES (
-                    :source_type, :source_id, :source_url, :content_hash,
-                    :board_item_ref, :category, :priority, :assigned_owner, :status
-                )
-                RETURNING id
-                """
-            ),
-            item.model_dump(),
-        ).scalar_one()
-        return int(new_id)
+        row = models.TrackedItem(**item.model_dump())
+        self._session.add(row)
+        self._session.flush()  # populate the generated primary key
+        return row.id
 
     def update_classification(
         self,
@@ -129,19 +112,12 @@ class PgTrackedItemStore:
         assigned_owner: str,
     ) -> None:
         self._session.execute(
-            text(
-                """
-                UPDATE tracked_items
-                SET content_hash = :content_hash, category = :category,
-                    priority = :priority, assigned_owner = :assigned_owner
-                WHERE id = :item_id
-                """
-            ),
-            {
-                "item_id": item_id,
-                "content_hash": content_hash,
-                "category": category,
-                "priority": priority,
-                "assigned_owner": assigned_owner,
-            },
+            update(models.TrackedItem)
+            .where(models.TrackedItem.id == item_id)
+            .values(
+                content_hash=content_hash,
+                category=category,
+                priority=priority,
+                assigned_owner=assigned_owner,
+            )
         )
