@@ -97,6 +97,9 @@ class InMemoryTrackedItemStore:
     def get(self, source_type: str, source_id: str) -> TrackedItem | None:
         return self.items.get((source_type, source_id))
 
+    def list_open(self) -> list[TrackedItem]:
+        return [item for item in self.items.values() if item.status == "created"]
+
     def create(self, item: NewTrackedItem) -> int:
         self._id += 1
         record = TrackedItem(

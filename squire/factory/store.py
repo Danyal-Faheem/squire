@@ -60,6 +60,10 @@ class TrackedItemStore(Protocol):
         """Return the tracked item for a signal, or ``None`` if not yet seen."""
         ...
 
+    def list_open(self) -> list[TrackedItem]:
+        """Return the work items that are still open (status ``created``)."""
+        ...
+
     def create(self, item: NewTrackedItem) -> int:
         """Insert a new tracked item and return its id."""
         ...
@@ -95,6 +99,14 @@ class PgTrackedItemStore:
             if row is None
             else TrackedItem.model_validate(row, from_attributes=True)
         )
+
+    def list_open(self) -> list[TrackedItem]:
+        rows = self._session.execute(
+            select(models.TrackedItem)
+            .where(models.TrackedItem.status == "created")
+            .order_by(models.TrackedItem.created_at)
+        ).scalars()
+        return [TrackedItem.model_validate(row, from_attributes=True) for row in rows]
 
     def create(self, item: NewTrackedItem) -> int:
         row = models.TrackedItem(**item.model_dump())
