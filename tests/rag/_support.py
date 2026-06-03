@@ -2,61 +2,21 @@
 """Shared offline fakes for the RAG brain tests.
 
 The brain talks only to three boundaries — the embedding client, the vector store,
-and the LLM client — so these helpers fake exactly those. The embedding and LLM
-clients are real instances with their transport swapped out (the idiom the Phase 0
-client tests established), and the vector store is a recording fake that returns
-canned results. Together they let every RAG test run with no network and no database.
+and the LLM client. The embedding and LLM client builders live in ``tests.fakes`` and
+inject a typed fake transport through the constructor; re-exported here for the RAG
+tests. The vector store is a recording fake that returns canned results. Together they
+let every RAG test run with no network and no database.
 """
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from typing import Any
 
-from squire.common.config import Settings
-from squire.common.embeddings import EmbeddingClient
-from squire.common.llm import LLMClient
 from squire.common.schemas import Document
 from squire.common.vectorstore import SearchResult
+from tests.fakes import make_embedder, make_llm
 
-
-def make_embedder(dim: int = 4, vector: list[float] | None = None) -> EmbeddingClient:
-    """A real EmbeddingClient whose transport returns a fixed vector for any input."""
-    fixed = vector if vector is not None else [0.1] * dim
-    client = EmbeddingClient(Settings(embedding_dim=dim))
-
-    def _create(*, model: str, input: list[str]) -> Any:
-        return SimpleNamespace(
-            data=[SimpleNamespace(embedding=list(fixed)) for _ in input]
-        )
-
-    client._client = SimpleNamespace(  # type: ignore[assignment]
-        embeddings=SimpleNamespace(create=_create)
-    )
-    return client
-
-
-def make_llm(
-    answer: str = "a grounded answer [1]", captured: list[Any] | None = None
-) -> LLMClient:
-    """A real LLMClient whose transport returns ``answer`` and records its calls.
-
-    Pass ``captured`` to collect the keyword arguments of each call (notably the
-    ``messages``), so a test can assert what prompt the generator constructed and
-    whether the model was invoked at all.
-    """
-    client = LLMClient(Settings(generation_model="test-model"))
-
-    def _create(**kwargs: Any) -> Any:
-        if captured is not None:
-            captured.append(kwargs)
-        message = SimpleNamespace(content=answer)
-        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
-
-    client._client = SimpleNamespace(  # type: ignore[assignment]
-        chat=SimpleNamespace(completions=SimpleNamespace(create=_create))
-    )
-    return client
+__all__ = ["RecordingVectorStore", "make_embedder", "make_llm", "result"]
 
 
 class RecordingVectorStore:

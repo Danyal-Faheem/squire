@@ -22,14 +22,13 @@ from typing import ClassVar
 
 import pytest
 
-from squire.common.config import Settings
 from squire.common.deployment import load_connector_configs
-from squire.common.embeddings import EmbeddingClient
 from squire.common.schemas import Document, Signal
 from squire.common.vectorstore import SearchResult
 from squire.connectors import registry
 from squire.connectors.base import ConnectorConfig, Cursor
 from squire.ingestion.orchestrator import IngestionMode, IngestionOrchestrator
+from tests.fakes import make_embedder
 
 NULL_KEY = "null-extensibility-probe"
 
@@ -101,23 +100,6 @@ class _InMemoryCursorStore:
         self.store[(connector_key, instance_id)] = cursor
 
 
-def _embedder(dim: int = 4) -> EmbeddingClient:
-    from types import SimpleNamespace
-    from typing import Any
-
-    client = EmbeddingClient(Settings(embedding_dim=dim))
-
-    def _create(*, model: str, input: list[str]) -> Any:
-        return SimpleNamespace(
-            data=[SimpleNamespace(embedding=[0.0] * dim) for _ in input]
-        )
-
-    client._client = SimpleNamespace(  # type: ignore[assignment]
-        embeddings=SimpleNamespace(create=_create)
-    )
-    return client
-
-
 @pytest.fixture
 def registered_null_connector() -> Iterator[None]:
     """Register the null connector via the public API; restore the registry after."""
@@ -157,7 +139,7 @@ def test_new_source_type_runs_from_config_alone(
     cursors = _InMemoryCursorStore()
     signals: list[Signal] = []
     orchestrator = IngestionOrchestrator(
-        embedder=_embedder(),
+        embedder=make_embedder(),
         vector_store=store,
         cursors=cursors,
         signal_handler=signals.append,

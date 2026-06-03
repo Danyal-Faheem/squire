@@ -6,12 +6,17 @@ speaks the OpenAI-compatible HTTP protocol, so the backend can be any service th
 implements it — a self-hosted inference server or a cloud provider. Swapping the
 backend is a matter of changing ``llm_base_url`` / ``llm_api_key`` /
 ``generation_model`` in configuration; no code changes anywhere downstream.
+
+The underlying transport is an *optional constructor parameter* typed as a small
+Protocol (:class:`ChatTransport`), defaulting to the real OpenAI-compatible client. Tests
+inject a fake through the constructor rather than reaching in to reassign a private
+attribute, so the seam is visible and typed.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Literal, TypedDict, cast
+from typing import Any, Literal, Protocol, TypedDict, cast
 
 from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam
@@ -28,14 +33,37 @@ class ChatMessage(TypedDict):
     content: str
 
 
+class _Completions(Protocol):
+    def create(self, **kwargs: Any) -> Any: ...
+
+
+class _Chat(Protocol):
+    @property
+    def completions(self) -> _Completions: ...
+
+
+class ChatTransport(Protocol):
+    """The slice of an OpenAI-compatible client the LLM wrapper uses."""
+
+    @property
+    def chat(self) -> _Chat: ...
+
+
 class LLMClient:
     """A thin, typed wrapper over an OpenAI-compatible chat endpoint."""
 
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(
+        self, settings: Settings | None = None, *, client: ChatTransport | None = None
+    ) -> None:
         self._settings = settings or get_settings()
-        self._client = OpenAI(
-            base_url=self._settings.llm_base_url,
-            api_key=self._settings.llm_api_key,
+        # The real client is viewed through our narrow Protocol; cast at this one
+        # boundary since the SDK's overloaded signatures don't structurally match.
+        self._client: ChatTransport = client or cast(
+            "ChatTransport",
+            OpenAI(
+                base_url=self._settings.llm_base_url,
+                api_key=self._settings.llm_api_key,
+            ),
         )
 
     def complete(

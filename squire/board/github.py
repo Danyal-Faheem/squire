@@ -18,7 +18,7 @@ assign, label, and comment on items, and requires project-specific configuration
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Protocol
 
 from github import Auth, Github
 
@@ -27,13 +27,25 @@ from squire.board.base import NewWorkItem
 logger = logging.getLogger(__name__)
 
 
+class GithubClient(Protocol):
+    """The slice of the GitHub client the board uses."""
+
+    def get_repo(self, full_name: str) -> Any: ...
+
+
 class GitHubBoard:
     """A board backed by GitHub Issues."""
 
-    def __init__(self, *, token: str | None = None, dry_run: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        token: str | None = None,
+        dry_run: bool = True,
+        client: GithubClient | None = None,
+    ) -> None:
         self._token = token
         self._dry_run = dry_run
-        self._client: Any | None = None
+        self._client: GithubClient | None = client
 
     def create_item(self, item: NewWorkItem) -> str:
         """Create a GitHub issue for ``item`` and return its ``owner/repo#number`` ref."""
@@ -69,7 +81,7 @@ class GitHubBoard:
         issue.create_comment(body)
         logger.info("commented on board item %s", item_ref)
 
-    def _github(self) -> Any:
+    def _github(self) -> GithubClient:
         if self._client is None:
             self._client = (
                 Github(auth=Auth.Token(self._token)) if self._token else Github()

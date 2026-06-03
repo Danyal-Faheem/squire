@@ -95,16 +95,27 @@ class _FakeRepo:
         return self._issues
 
 
+class _FakeGithub:
+    """A GitHub client whose get_repo returns a pre-built fake repository."""
+
+    def __init__(self, repo: _FakeRepo | None = None) -> None:
+        self._repo = repo
+        self.requested: list[str] = []
+
+    def get_repo(self, full_name: str) -> _FakeRepo | None:
+        self.requested.append(full_name)
+        return self._repo
+
+
 def _connector(repo: _FakeRepo, **settings: object) -> GithubConnector:
-    connector = GithubConnector(
+    return GithubConnector(
         ConnectorConfig(
             key="github",
             instance_id="gh",
             settings={"repo": "owner/name", **settings},
-        )
+        ),
+        client=_FakeGithub(repo),
     )
-    connector._repo = repo
-    return connector
 
 
 def _aware(day: int) -> datetime:
@@ -230,25 +241,18 @@ def test_issues_fetched_once_across_both_iterators() -> None:
     assert len(repo.get_issues_calls) == 1
 
 
-def test_anonymous_when_no_token() -> None:
-    """With no token the connector still builds a usable client lazily."""
-    repo = _FakeRepo()
-
-    class _FakeGithub:
-        def __init__(self) -> None:
-            self.requested: list[str] = []
-
-        def get_repo(self, full_name: str) -> _FakeRepo:
-            self.requested.append(full_name)
-            return repo
-
+def test_resolves_repo_through_injected_client() -> None:
+    """Healthcheck resolves the configured repository through the injected client."""
+    client = _FakeGithub(_FakeRepo())
     connector = GithubConnector(
-        ConnectorConfig(key="github", instance_id="gh", settings={"repo": "owner/name"})
+        ConnectorConfig(
+            key="github", instance_id="gh", settings={"repo": "owner/name"}
+        ),
+        client=client,
     )
-    connector._client = _FakeGithub()
     connector.healthcheck()
 
-    assert connector._client.requested == ["owner/name"]
+    assert client.requested == ["owner/name"]
 
 
 def test_missing_required_setting_fails_fast() -> None:
@@ -265,8 +269,10 @@ def test_healthcheck_propagates_access_error() -> None:
             raise RuntimeError("401 Bad credentials")
 
     connector = GithubConnector(
-        ConnectorConfig(key="github", instance_id="gh", settings={"repo": "owner/name"})
+        ConnectorConfig(
+            key="github", instance_id="gh", settings={"repo": "owner/name"}
+        ),
+        client=_BoomGithub(),
     )
-    connector._client = _BoomGithub()
     with pytest.raises(RuntimeError, match="Bad credentials"):
         connector.healthcheck()

@@ -19,17 +19,27 @@ from typing import Any, ClassVar
 
 import pytest
 
-from squire.common.config import Settings
 from squire.common.deployment import load_connector_configs
-from squire.common.embeddings import EmbeddingClient
 from squire.common.schemas import Document, Signal
 from squire.common.vectorstore import SearchResult
 from squire.connectors import registry
 from squire.connectors.base import Cursor
+from squire.connectors.github import GithubConnector
 from squire.ingestion.cursors import CursorStore
 from squire.ingestion.orchestrator import IngestionMode, IngestionOrchestrator
+from tests.fakes import make_embedder
 
 # --- fakes -------------------------------------------------------------------------
+
+
+class _FakeGithubClient:
+    """A GitHub client whose get_repo returns a pre-built fake repository."""
+
+    def __init__(self, repo: Any) -> None:
+        self._repo = repo
+
+    def get_repo(self, full_name: str) -> Any:
+        return self._repo
 
 
 class FakeVectorStore:
@@ -129,27 +139,13 @@ def _signal(source_id: str) -> Signal:
     )
 
 
-def _embedder(dim: int = 4) -> EmbeddingClient:
-    """A real EmbeddingClient with a faked transport returning fixed vectors."""
-    client = EmbeddingClient(Settings(embedding_dim=dim))
-
-    def _create(*, model: str, input: list[str]) -> Any:
-        data = [SimpleNamespace(embedding=[0.0] * dim) for _ in input]
-        return SimpleNamespace(data=data)
-
-    client._client = SimpleNamespace(  # type: ignore[assignment]
-        embeddings=SimpleNamespace(create=_create)
-    )
-    return client
-
-
 def _orchestrator(
     vector_store: FakeVectorStore,
     cursors: CursorStore,
     signal_handler: Any | None = None,
 ) -> IngestionOrchestrator:
     return IngestionOrchestrator(
-        embedder=_embedder(),
+        embedder=make_embedder(),
         vector_store=vector_store,
         cursors=cursors,
         signal_handler=signal_handler,
@@ -333,11 +329,9 @@ def test_end_to_end_from_deployment_config(tmp_path: Path) -> None:
     )
 
     configs = load_connector_configs(deployment)
-    connectors = registry.create_all(configs)
-
-    # Inject a fake repository into the github connector so no network is touched.
-    github = connectors[1]
-    github._repo = SimpleNamespace(  # type: ignore[attr-defined]
+    # The filesystem connector comes from the registry; the github connector is built
+    # with a fake GitHub client injected through its constructor so no network is hit.
+    fake_repo = SimpleNamespace(
         full_name="owner/name",
         get_issues=lambda **kwargs: [
             SimpleNamespace(
@@ -351,6 +345,10 @@ def test_end_to_end_from_deployment_config(tmp_path: Path) -> None:
             )
         ],
     )
+    connectors = [
+        registry.create(configs[0]),
+        GithubConnector(configs[1], client=_FakeGithubClient(fake_repo)),
+    ]
 
     store = FakeVectorStore()
     cursors = InMemoryCursorStore()

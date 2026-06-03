@@ -55,7 +55,7 @@ def test_query_returns_cited_answer_from_real_index(postgres_ready: None) -> Non
     # The query embedder returns the "near" vector, so retrieval should rank that
     # chunk first; the LLM is faked to echo a citation.
     embedder = make_embedder(dim=EMBEDDING_DIM, vector=vectors["near"])
-    llm = make_llm(answer="Run the rotate command [1].")
+    llm = make_llm(content="Run the rotate command [1].")
 
     with session_scope() as session:
         brain = Brain(embedder=embedder, vector_store=PgVectorStore(session), llm=llm)
@@ -83,7 +83,7 @@ def test_source_type_filter_excludes_other_types(postgres_ready: None) -> None:
         PgVectorStore(session).upsert(docs)
 
     embedder = make_embedder(dim=EMBEDDING_DIM, vector=shared_vector)
-    llm = make_llm(answer="Per the docs [1].")
+    llm = make_llm(content="Per the docs [1].")
 
     with session_scope() as session:
         brain = Brain(embedder=embedder, vector_store=PgVectorStore(session), llm=llm)

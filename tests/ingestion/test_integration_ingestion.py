@@ -19,35 +19,33 @@ from typing import Any
 import pytest
 from sqlalchemy import text
 
-from squire.common.config import Settings
 from squire.common.db import session_scope
 from squire.common.deployment import load_connector_configs
-from squire.common.embeddings import EmbeddingClient
 from squire.common.vectorstore import PgVectorStore
 from squire.connectors import registry
+from squire.connectors.github import GithubConnector
 from squire.ingestion.cursors import PgCursorStore
 from squire.ingestion.orchestrator import IngestionMode, IngestionOrchestrator
+from tests.fakes import make_embedder
 
 pytestmark = pytest.mark.integration
 
 EMBEDDING_DIM = 1024
 
 
-def _embedder() -> EmbeddingClient:
-    """A real client with a faked transport returning schema-width vectors."""
-    client = EmbeddingClient(Settings(embedding_dim=EMBEDDING_DIM))
-
-    def _create(*, model: str, input: list[str]) -> Any:
-        data = [SimpleNamespace(embedding=[0.0] * EMBEDDING_DIM) for _ in input]
-        return SimpleNamespace(data=data)
-
-    client._client = SimpleNamespace(  # type: ignore[assignment]
-        embeddings=SimpleNamespace(create=_create)
-    )
-    return client
+def _embedder() -> Any:
+    return make_embedder(dim=EMBEDDING_DIM, vector=[0.0] * EMBEDDING_DIM)
 
 
-def _fake_repo() -> SimpleNamespace:
+class _FakeGithubClient:
+    def __init__(self, repo: Any) -> None:
+        self._repo = repo
+
+    def get_repo(self, full_name: str) -> Any:
+        return self._repo
+
+
+def _fake_repo() -> Any:
     return SimpleNamespace(
         full_name="owner/name",
         get_issues=lambda **kwargs: [
@@ -88,10 +86,13 @@ def _build_connectors(tmp_path: Path) -> list[Any]:
         encoding="utf-8",
     )
 
-    connectors = registry.create_all(load_connector_configs(deployment))
-    # Inject a fake repository so the github connector touches no network.
-    connectors[1]._repo = _fake_repo()  # type: ignore[attr-defined]
-    return connectors
+    configs = load_connector_configs(deployment)
+    # The github connector is built with a fake client injected through its
+    # constructor so it touches no network; the filesystem one comes from the registry.
+    return [
+        registry.create(configs[0]),
+        GithubConnector(configs[1], client=_FakeGithubClient(_fake_repo())),
+    ]
 
 
 def test_documents_land_in_chunks_with_metadata(

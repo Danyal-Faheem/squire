@@ -11,11 +11,9 @@ raising and never inventing a category nothing can route.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from types import SimpleNamespace
 from typing import Any
 
 from squire.classify.llm import LLMClassifier
-from squire.common.config import Settings
 from squire.common.deployment import (
     Category,
     DeploymentPolicy,
@@ -25,8 +23,8 @@ from squire.common.deployment import (
     Routing,
     Taxonomy,
 )
-from squire.common.llm import LLMClient
 from squire.common.schemas import Signal
+from tests.fakes import make_llm as _llm
 
 
 def _policy() -> DeploymentPolicy:
@@ -54,21 +52,6 @@ def _policy() -> DeploymentPolicy:
             default="p2",
         ),
     )
-
-
-def _llm(reply: str, captured: list[Any] | None = None) -> LLMClient:
-    client = LLMClient(Settings(generation_model="test-model"))
-
-    def _create(**kwargs: Any) -> Any:
-        if captured is not None:
-            captured.append(kwargs)
-        message = SimpleNamespace(content=reply)
-        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
-
-    client._client = SimpleNamespace(  # type: ignore[assignment]
-        chat=SimpleNamespace(completions=SimpleNamespace(create=_create))
-    )
-    return client
 
 
 def _signal(title: str = "Login fails", body: str = "It errors out") -> Signal:

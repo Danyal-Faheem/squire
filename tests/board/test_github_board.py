@@ -67,9 +67,8 @@ def _item() -> NewWorkItem:
 
 def test_dry_run_create_makes_no_github_call() -> None:
     """With dry-run on, creating an item never touches the GitHub client."""
-    board = GitHubBoard(dry_run=True)
     fake = _FakeGithub()
-    board._client = fake
+    board = GitHubBoard(dry_run=True, client=fake)
 
     ref = board.create_item(_item())
 
@@ -79,9 +78,8 @@ def test_dry_run_create_makes_no_github_call() -> None:
 
 def test_dry_run_comment_makes_no_github_call() -> None:
     """With dry-run on, commenting never touches the GitHub client."""
-    board = GitHubBoard(dry_run=True)
     fake = _FakeGithub()
-    board._client = fake
+    board = GitHubBoard(dry_run=True, client=fake)
 
     board.comment("acme/widget#5", "a reply")
 
@@ -93,9 +91,8 @@ def test_dry_run_comment_makes_no_github_call() -> None:
 
 def test_create_item_opens_issue_with_fields() -> None:
     """When live, the board creates an issue carrying the item's fields."""
-    board = GitHubBoard(dry_run=False)
     fake = _FakeGithub()
-    board._client = fake
+    board = GitHubBoard(dry_run=False, client=fake)
 
     ref = board.create_item(_item())
 
@@ -108,9 +105,8 @@ def test_create_item_opens_issue_with_fields() -> None:
 
 def test_comment_posts_to_referenced_issue() -> None:
     """When live, a comment lands on the issue named by the reference."""
-    board = GitHubBoard(dry_run=False)
     fake = _FakeGithub()
-    board._client = fake
+    board = GitHubBoard(dry_run=False, client=fake)
 
     board.comment("acme/widget#7", "here is some context")
 
@@ -119,7 +115,6 @@ def test_comment_posts_to_referenced_issue() -> None:
 
 def test_bad_reference_is_rejected() -> None:
     """A reference that is not owner/repo#number is a clear error."""
-    board = GitHubBoard(dry_run=False)
-    board._client = _FakeGithub()
+    board = GitHubBoard(dry_run=False, client=_FakeGithub())
     with pytest.raises(ValueError, match="board reference"):
         board.comment("not-a-ref", "x")

@@ -22,7 +22,7 @@ import base64
 import hashlib
 from collections.abc import Iterator
 from datetime import UTC, datetime
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Protocol
 
 from github import Auth, Github
 from pydantic import BaseModel, Field
@@ -35,6 +35,12 @@ from squire.connectors.registry import register
 SOURCE_TYPE_CODE = "github_code"
 SOURCE_TYPE_ISSUE = "github_issue"
 SOURCE_TYPE_PULL = "github_pull"
+
+
+class GithubClient(Protocol):
+    """The slice of the GitHub client this connector uses."""
+
+    def get_repo(self, full_name: str) -> Any: ...
 
 
 class GithubSettings(BaseModel):
@@ -83,12 +89,15 @@ class GithubConnector:
 
     key: ClassVar[str] = "github"
 
-    def __init__(self, config: ConnectorConfig) -> None:
+    def __init__(
+        self, config: ConnectorConfig, *, client: GithubClient | None = None
+    ) -> None:
         self.instance_id = config.instance_id
         self._settings = GithubSettings.model_validate(config.settings)
         self._extensions = {ext.lower() for ext in self._settings.code_extensions}
-        # Injectable seams: tests set these directly to run the connector offline.
-        self._client: Any | None = None
+        # The GitHub client is injected (tests pass a fake); built lazily from the
+        # configured token when omitted. The repository handle is cached internally.
+        self._client: GithubClient | None = client
         self._repo: Any | None = None
         # The newest issue/PR ``updated_at`` observed this run, serialized into the
         # cursor so the next run only fetches items changed since.
@@ -216,7 +225,7 @@ class GithubConnector:
             self._repo = self._github().get_repo(self._settings.repo)
         return self._repo
 
-    def _github(self) -> Any:
+    def _github(self) -> GithubClient:
         if self._client is None:
             token = self._settings.token
             self._client = Github(auth=Auth.Token(token)) if token else Github()
