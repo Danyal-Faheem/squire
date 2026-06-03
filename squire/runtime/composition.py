@@ -41,6 +41,7 @@ from squire.connectors import registry
 from squire.connectors.base import Connector
 from squire.factory.store import PgTrackedItemStore
 from squire.factory.work_items import WorkItemFactory
+from squire.ingestion.chunking import DocumentProcessor, LocalDocumentProcessor
 from squire.ingestion.cursors import PgCursorStore
 from squire.ingestion.orchestrator import IngestionOrchestrator, SignalHandler
 from squire.messaging.base import MessagingAdapter
@@ -62,6 +63,7 @@ class Runtime:
         deployment: str | Path | None = None,
         llm: LLMClient | None = None,
         embedder: EmbeddingClient | None = None,
+        processor: DocumentProcessor | None = None,
     ) -> None:
         self._settings = settings or get_settings()
         self._deployment: str | Path = (
@@ -69,6 +71,7 @@ class Runtime:
         )
         self._llm = llm or LLMClient(self._settings)
         self._embedder = embedder or EmbeddingClient(self._settings)
+        self._processor = processor or LocalDocumentProcessor()
         self._prompts = self._build_prompt_library()
 
     def _build_prompt_library(self) -> PromptLibrary:
@@ -206,6 +209,7 @@ class Runtime:
             embedder=self._embedder,
             vector_store=PgVectorStore(session),
             cursors=PgCursorStore(session),
+            processor=self._processor,
             signal_handler=signal_handler,
         )
 

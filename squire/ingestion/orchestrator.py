@@ -32,9 +32,10 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 
 from squire.common.embeddings import EmbeddingClient
-from squire.common.schemas import Document, Signal
+from squire.common.schemas import Chunk, Document, Signal
 from squire.common.vectorstore import VectorStore
 from squire.connectors.base import Connector, Cursor
+from squire.ingestion.chunking import DocumentProcessor, LocalDocumentProcessor
 from squire.ingestion.cursors import CursorStore
 
 logger = logging.getLogger(__name__)
@@ -71,7 +72,7 @@ class ConnectorRunResult:
 
     key: str
     instance_id: str
-    documents_indexed: int
+    chunks_indexed: int
     signals_emitted: int
 
 
@@ -82,9 +83,9 @@ class IngestionResult:
     runs: list[ConnectorRunResult] = field(default_factory=list)
 
     @property
-    def documents_indexed(self) -> int:
-        """Total new chunks written across all connectors."""
-        return sum(run.documents_indexed for run in self.runs)
+    def chunks_indexed(self) -> int:
+        """Total new chunks written to the knowledge base across all connectors."""
+        return sum(run.chunks_indexed for run in self.runs)
 
     @property
     def signals_emitted(self) -> int:
@@ -101,12 +102,14 @@ class IngestionOrchestrator:
         embedder: EmbeddingClient,
         vector_store: VectorStore,
         cursors: CursorStore,
+        processor: DocumentProcessor | None = None,
         signal_handler: SignalHandler | None = None,
         batch_size: int = 64,
     ) -> None:
         self._embedder = embedder
         self._vector_store = vector_store
         self._cursors = cursors
+        self._processor = processor or LocalDocumentProcessor()
         self._signal_handler = signal_handler or logging_signal_handler
         self._batch_size = batch_size
 
@@ -128,7 +131,7 @@ class IngestionOrchestrator:
         # Drain documents first and index them, then drain signals. Both iterators
         # must be exhausted before reading the cursor, since a connector's watermark
         # reflects everything it has yielded.
-        indexed = self._index(connector.iter_documents(since))
+        chunks_indexed = self._index(connector.iter_documents(since))
 
         signals_emitted = 0
         for signal in connector.iter_signals(since):
@@ -138,16 +141,16 @@ class IngestionOrchestrator:
         self._advance_cursor(connector)
 
         logger.info(
-            "connector %s/%s indexed %d documents, emitted %d signals",
+            "connector %s/%s indexed %d chunks, emitted %d signals",
             connector.key,
             connector.instance_id,
-            indexed,
+            chunks_indexed,
             signals_emitted,
         )
         return ConnectorRunResult(
             key=connector.key,
             instance_id=connector.instance_id,
-            documents_indexed=indexed,
+            chunks_indexed=chunks_indexed,
             signals_emitted=signals_emitted,
         )
 
@@ -164,21 +167,23 @@ class IngestionOrchestrator:
             self._cursors.set(connector.key, connector.instance_id, cursor)
 
     def _index(self, documents: Iterable[Document]) -> int:
+        """Chunk each source document, then embed and store the chunks in batches."""
         written = 0
-        for batch in _batched(documents, self._batch_size):
-            embeddings = self._embedder.embed([doc.content for doc in batch])
-            written += self._vector_store.upsert(
-                list(zip(batch, embeddings, strict=True))
-            )
+        batch: list[Chunk] = []
+        for document in documents:
+            for chunk in self._processor.process(document):
+                batch.append(chunk)
+                if len(batch) >= self._batch_size:
+                    written += self._embed_and_store(batch)
+                    batch = []
+        if batch:
+            written += self._embed_and_store(batch)
         return written
 
-
-def _batched(items: Iterable[Document], size: int) -> Iterable[list[Document]]:
-    batch: list[Document] = []
-    for item in items:
-        batch.append(item)
-        if len(batch) >= size:
-            yield batch
-            batch = []
-    if batch:
-        yield batch
+    def _embed_and_store(self, chunks: list[Chunk]) -> int:
+        embeddings = self._embedder.embed([chunk.content for chunk in chunks])
+        pairs: list[tuple[Document, list[float]]] = [
+            (chunk, embedding)
+            for chunk, embedding in zip(chunks, embeddings, strict=True)
+        ]
+        return self._vector_store.upsert(pairs)

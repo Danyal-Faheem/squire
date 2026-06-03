@@ -23,8 +23,8 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from squire.common.models import Chunk
-from squire.common.schemas import Document
+from squire.common import models
+from squire.common.schemas import Chunk, Document
 
 
 class SearchResult(Document):
@@ -66,12 +66,15 @@ class PgVectorStore:
 
         Returns the number of rows actually written. De-duplication on
         ``content_hash`` (an ``ON CONFLICT DO NOTHING`` upsert) is what keeps
-        incremental re-ingestion from creating duplicate vectors.
+        incremental re-ingestion from creating duplicate vectors. Each item carries
+        chunk lineage when it is a :class:`~squire.common.schemas.Chunk`; a bare
+        :class:`~squire.common.schemas.Document` is stored as a single self-parented
+        chunk.
         """
         written = 0
         for doc, embedding in documents:
             statement = (
-                pg_insert(Chunk)
+                pg_insert(models.Chunk)
                 .values(
                     source_type=doc.source_type,
                     source_url=doc.source_url,
@@ -79,9 +82,10 @@ class PgVectorStore:
                     content=doc.content,
                     embedding=embedding,
                     content_hash=doc.content_hash,
+                    **_lineage(doc),
                 )
-                .on_conflict_do_nothing(index_elements=[Chunk.content_hash])
-                .returning(Chunk.id)
+                .on_conflict_do_nothing(index_elements=[models.Chunk.content_hash])
+                .returning(models.Chunk.id)
             )
             # RETURNING yields one row when the chunk was inserted and none when the
             # content_hash already existed, so the row count is exactly what was
@@ -101,21 +105,21 @@ class PgVectorStore:
         When ``source_types`` is given, retrieval is restricted to those source
         types — this is how the various answer paths bias retrieval.
         """
-        distance = Chunk.embedding.cosine_distance(embedding)
+        distance = models.Chunk.embedding.cosine_distance(embedding)
         statement = (
             select(
-                Chunk.source_type,
-                Chunk.source_url,
-                Chunk.origin,
-                Chunk.content,
-                Chunk.content_hash,
+                models.Chunk.source_type,
+                models.Chunk.source_url,
+                models.Chunk.origin,
+                models.Chunk.content,
+                models.Chunk.content_hash,
                 (1 - distance).label("score"),
             )
             .order_by(distance)
             .limit(limit)
         )
         if source_types:
-            statement = statement.where(Chunk.source_type.in_(source_types))
+            statement = statement.where(models.Chunk.source_type.in_(source_types))
 
         rows = self._session.execute(statement).mappings()
         return [
@@ -129,3 +133,20 @@ class PgVectorStore:
             )
             for row in rows
         ]
+
+
+def _lineage(doc: Document) -> dict[str, object]:
+    """Return the chunk-lineage columns for a chunk, or self-parented defaults."""
+    if isinstance(doc, Chunk):
+        return {
+            "parent_content_hash": doc.parent_content_hash,
+            "chunk_index": doc.chunk_index,
+            "title": doc.title,
+            "metadata_json": doc.metadata_json,
+        }
+    return {
+        "parent_content_hash": doc.content_hash,
+        "chunk_index": 0,
+        "title": None,
+        "metadata_json": None,
+    }

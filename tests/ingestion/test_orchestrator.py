@@ -164,8 +164,22 @@ def test_backfill_indexes_documents_and_counts() -> None:
         [connector], mode=IngestionMode.BACKFILL
     )
 
-    assert result.documents_indexed == 2
+    assert result.chunks_indexed == 2
     assert len(store.rows) == 2
+
+
+def test_long_document_is_chunked_into_multiple_rows() -> None:
+    """A large source document is split before embedding, not stored as one vector."""
+    store = FakeVectorStore()
+    long_content = "\n\n".join("Paragraph. " + "word " * 80 for _ in range(20))
+    connector = FakeConnector(documents=[_doc("big-hash", content=long_content)])
+
+    result = _orchestrator(store, InMemoryCursorStore()).run([connector])
+
+    assert result.chunks_indexed > 1
+    assert len(store.rows) > 1
+    # Every chunk still points at the source document's locator.
+    assert {row.source_url for row in store.rows} == {"https://example.test/big-hash"}
 
 
 def test_signals_are_dispatched_to_handler() -> None:
@@ -237,8 +251,8 @@ def test_rerun_adds_only_new_content() -> None:
     first = orchestrator.run([FakeConnector(documents=[_doc("h1"), _doc("h2")])])
     second = orchestrator.run([FakeConnector(documents=[_doc("h1"), _doc("h2")])])
 
-    assert first.documents_indexed == 2
-    assert second.documents_indexed == 0
+    assert first.chunks_indexed == 2
+    assert second.chunks_indexed == 0
     assert len(store.rows) == 2
 
 
@@ -292,7 +306,7 @@ def test_multiple_connectors_are_aggregated() -> None:
 
     result = _orchestrator(store, InMemoryCursorStore()).run(connectors)
 
-    assert result.documents_indexed == 2
+    assert result.chunks_indexed == 2
     assert result.signals_emitted == 1
     assert len(result.runs) == 2
 
@@ -366,4 +380,4 @@ def test_end_to_end_from_deployment_config(tmp_path: Path) -> None:
 
     # A second live run re-reads nothing new: de-dup keeps the corpus stable.
     second = orchestrator.run(connectors, mode=IngestionMode.LIVE)
-    assert second.documents_indexed == 0
+    assert second.chunks_indexed == 0

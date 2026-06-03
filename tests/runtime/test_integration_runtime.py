@@ -63,7 +63,7 @@ def test_runtime_wires_ingestion_then_retrieval(
         result = runtime.build_orchestrator(session).run(
             connectors, mode=IngestionMode.BACKFILL
         )
-    assert result.documents_indexed == 1
+    assert result.chunks_indexed == 1
 
     with session_scope() as session:
         answer = runtime.build_brain(session).query("how do I reset the token?")

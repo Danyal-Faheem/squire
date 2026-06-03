@@ -152,7 +152,7 @@ def test_new_source_type_runs_from_config_alone(
     # ...the signal was dispatched...
     assert [s.source_id for s in signals] == ["null#1"]
     # ...the counts add up...
-    assert result.documents_indexed == 1
+    assert result.chunks_indexed == 1
     assert result.signals_emitted == 1
     # ...and the watermark was persisted under the new key.
     assert cursors.get(NULL_KEY, "probe") == Cursor(value="null-watermark")

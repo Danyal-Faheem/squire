@@ -52,4 +52,4 @@ def test_run_returns_empty_when_no_connectors_match(tmp_path: Path) -> None:
     result = run(["--deployment", str(deployment), "--connector", "github"])
 
     assert result.runs == []
-    assert result.documents_indexed == 0
+    assert result.chunks_indexed == 0

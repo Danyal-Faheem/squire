@@ -93,8 +93,8 @@ def run(
         result = orchestrator.run(connectors, mode=args.mode)
 
     logger.info(
-        "ingestion complete: %d documents indexed, %d signals emitted",
-        result.documents_indexed,
+        "ingestion complete: %d chunks indexed, %d signals emitted",
+        result.chunks_indexed,
         result.signals_emitted,
     )
     return result

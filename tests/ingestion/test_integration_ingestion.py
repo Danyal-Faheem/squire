@@ -111,21 +111,27 @@ def test_documents_land_in_chunks_with_metadata(
         )
         result = orchestrator.run(connectors, mode=IngestionMode.BACKFILL)
 
-    assert result.documents_indexed == 2
+    assert result.chunks_indexed == 2
     assert signals == ["owner/name#1"]
 
     with session_scope() as session:
         rows = (
             session.execute(
-                text("SELECT source_type, origin FROM chunks ORDER BY source_type")
+                text(
+                    "SELECT source_type, origin, parent_content_hash, chunk_index "
+                    "FROM chunks ORDER BY source_type"
+                )
             )
             .mappings()
             .all()
         )
 
-    by_type = {row["source_type"]: row["origin"] for row in rows}
-    assert by_type["docs"] == "intro.md"
-    assert by_type["github_issue"] == "owner/name#1"
+    by_type = {row["source_type"]: row for row in rows}
+    assert by_type["docs"]["origin"] == "intro.md"
+    assert by_type["github_issue"]["origin"] == "owner/name#1"
+    # The chunk lineage columns are populated, not null.
+    assert all(row["parent_content_hash"] for row in rows)
+    assert all(row["chunk_index"] == 0 for row in rows)  # short docs → one chunk each
 
 
 def test_cursors_persist_and_rerun_adds_nothing(
@@ -165,4 +171,4 @@ def test_cursors_persist_and_rerun_adds_nothing(
         )
         second = orchestrator.run(connectors, mode=IngestionMode.LIVE)
 
-    assert second.documents_indexed == 0
+    assert second.chunks_indexed == 0
