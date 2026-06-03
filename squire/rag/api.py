@@ -22,12 +22,10 @@ from fastapi import Depends, FastAPI
 from pydantic import BaseModel, Field
 
 from squire.common.db import session_scope
-from squire.common.embeddings import EmbeddingClient
-from squire.common.llm import LLMClient
 from squire.common.schemas import Classification, Signal
-from squire.common.vectorstore import PgVectorStore
 from squire.rag.brain import Brain
 from squire.rag.schemas import GroundedAnswer
+from squire.runtime import Runtime
 
 app = FastAPI(title="Squire RAG brain")
 
@@ -50,20 +48,19 @@ class DraftRequest(BaseModel):
 
 
 @lru_cache
-def _clients() -> tuple[EmbeddingClient, LLMClient]:
-    """Build the embedding and LLM clients once and reuse them across requests."""
-    return EmbeddingClient(), LLMClient()
+def _runtime() -> Runtime:
+    """Build the composition root once and reuse it across requests."""
+    return Runtime()
 
 
 def get_brain() -> Iterator[Brain]:
     """Yield a brain bound to a request-scoped database session.
 
-    Overridden in tests to supply a brain backed by fakes; in production it reuses
-    the cached clients and opens a transactional session for the vector store.
+    Overridden in tests to supply a brain backed by fakes; in production it asks the
+    composition root to wire the brain over a transactional session.
     """
-    embedder, llm = _clients()
     with session_scope() as session:
-        yield Brain(embedder=embedder, vector_store=PgVectorStore(session), llm=llm)
+        yield _runtime().build_brain(session)
 
 
 @app.get("/health")

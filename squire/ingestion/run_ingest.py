@@ -17,16 +17,8 @@ from collections.abc import Sequence
 
 from squire.common.config import get_settings
 from squire.common.db import session_scope
-from squire.common.deployment import load_connector_configs
-from squire.common.embeddings import EmbeddingClient
-from squire.common.vectorstore import PgVectorStore
-from squire.connectors.registry import create
-from squire.ingestion.cursors import PgCursorStore
-from squire.ingestion.orchestrator import (
-    IngestionMode,
-    IngestionOrchestrator,
-    IngestionResult,
-)
+from squire.ingestion.orchestrator import IngestionMode, IngestionResult
+from squire.runtime import Runtime
 
 logger = logging.getLogger(__name__)
 
@@ -74,24 +66,20 @@ def run(argv: Sequence[str] | None = None) -> IngestionResult:
     settings = get_settings()
     deployment = args.deployment or settings.squire_deployment
 
-    configs = load_connector_configs(deployment)
+    runtime = Runtime(settings, deployment=deployment)
+    connectors = runtime.build_connectors()
     if args.connectors:
         wanted = set(args.connectors)
-        configs = [config for config in configs if config.key in wanted]
-    if not configs:
+        connectors = [c for c in connectors if c.key in wanted]
+    if not connectors:
         logger.warning("no connectors selected for deployment %r", deployment)
         return IngestionResult()
 
-    connectors = [create(config) for config in configs]
     for connector in connectors:
         connector.healthcheck()
 
     with session_scope() as session:
-        orchestrator = IngestionOrchestrator(
-            embedder=EmbeddingClient(settings),
-            vector_store=PgVectorStore(session),
-            cursors=PgCursorStore(session),
-        )
+        orchestrator = runtime.build_orchestrator(session)
         result = orchestrator.run(connectors, mode=args.mode)
 
     logger.info(
