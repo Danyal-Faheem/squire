@@ -38,7 +38,16 @@ _PLACEHOLDER = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 
 class DeploymentConfigError(Exception):
-    """Raised when a deployment's configuration is missing or malformed."""
+    """Raised when a deployment's configuration is present but malformed."""
+
+
+class MissingDeploymentConfigError(DeploymentConfigError):
+    """Raised when a deployment directory or a config file is absent.
+
+    Distinguished from the base error so callers can treat *absent* configuration
+    (a legitimate early-phase state worth falling back on) differently from
+    *malformed* configuration (a mistake that should fail loudly).
+    """
 
 
 def deployment_dir(name: str, *, base: Path | None = None) -> Path:
@@ -84,13 +93,15 @@ def _resolve_dir(deployment: str | Path, base: Path | None) -> Path:
     else:
         directory = deployment_dir(str(deployment), base=base)
     if not directory.is_dir():
-        raise DeploymentConfigError(f"deployment directory not found: {directory}")
+        raise MissingDeploymentConfigError(
+            f"deployment directory not found: {directory}"
+        )
     return directory
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
     if not path.is_file():
-        raise DeploymentConfigError(f"missing configuration file: {path}")
+        raise MissingDeploymentConfigError(f"missing configuration file: {path}")
     loaded = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     if not isinstance(loaded, dict):
         raise DeploymentConfigError(f"{path} must contain a top-level mapping")

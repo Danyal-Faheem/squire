@@ -24,7 +24,7 @@ from squire.classify.llm import LLMClassifier
 from squire.common import models
 from squire.common.config import Settings, get_settings
 from squire.common.deployment import (
-    DeploymentConfigError,
+    MissingDeploymentConfigError,
     load_connector_configs,
     load_policy,
 )
@@ -81,14 +81,15 @@ class Runtime:
         """Return the active classifier.
 
         When the deployment provides a policy (taxonomy, routing, priorities), this is
-        the LLM-backed classifier bound to that policy. Until a deployment supplies
-        one, it falls back to the trivial default so the engine still runs — this is
-        the composition root deciding which classifier is active based on what
-        configuration exists.
+        the LLM-backed classifier bound to that policy. When the policy is genuinely
+        *absent* — a legitimate early-phase state — it falls back to the trivial
+        default so the engine still runs. A policy that is present but *malformed* is
+        not caught: it propagates and fails loudly, because silently degrading to
+        "everything uncategorized" on a typo is the worst kind of quiet config error.
         """
         try:
             policy = load_policy(self._deployment)
-        except DeploymentConfigError:
+        except MissingDeploymentConfigError:
             logger.info("no deployment policy found; using the default classifier")
             return default_classifier
         return LLMClassifier(self._llm, policy).classify

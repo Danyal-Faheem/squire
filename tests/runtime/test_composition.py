@@ -17,6 +17,7 @@ import pytest
 
 from squire.common import models
 from squire.common.config import Settings
+from squire.common.deployment import DeploymentConfigError
 from squire.common.schemas import Signal
 from squire.rag.brain import default_classifier
 from squire.runtime import Runtime
@@ -121,3 +122,22 @@ def test_classifier_is_llm_backed_with_policy(tmp_path: Path) -> None:
     assert result.category == "bug"
     assert result.priority_key == "p0"
     assert result.owner == "core"  # routed from the policy
+
+
+def test_classifier_fails_loudly_on_malformed_policy(tmp_path: Path) -> None:
+    """A present-but-invalid policy is a loud error, not a silent fallback."""
+    directory = tmp_path / "dep"
+    directory.mkdir()
+    (directory / "deployment.yml").write_text("connectors: []\n", encoding="utf-8")
+    (directory / "taxonomy.yml").write_text(
+        "categories:\n  - name: bug\n", encoding="utf-8"
+    )
+    (directory / "priorities.yml").write_text(
+        "levels:\n  - key: p0\n    label: x\n", encoding="utf-8"
+    )
+    # routing.yml is present but invalid: it omits the required default route.
+    (directory / "routing.yml").write_text("routes: {}\n", encoding="utf-8")
+
+    runtime = _runtime(directory)
+    with pytest.raises(DeploymentConfigError):
+        runtime.classifier()
