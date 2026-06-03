@@ -65,6 +65,10 @@ class DiscourseConnector:
         self._base = self._settings.base_url.rstrip("/")
         self._client = client
         self._watermark: datetime | None = None
+        # True when a run stopped at max_topics with more still available, so the
+        # read covered only a bounded prefix of the forum and the cursor must not
+        # advance (advancing would silently skip the unread older topics).
+        self._truncated = False
         self._topic_cache: list[dict[str, Any]] | None = None
         self._topic_cache_key: str | None = None
         self._detail_cache: dict[int, dict[str, Any]] = {}
@@ -92,8 +96,15 @@ class DiscourseConnector:
             yield self._topic_signal(topic)
 
     def current_cursor(self) -> Cursor | None:
-        """Return the newest topic activity seen, encoded as the cursor."""
-        if self._watermark is None:
+        """Return the newest topic activity seen, encoded as the cursor.
+
+        Returns ``None`` when the run was bounded by ``max_topics`` (it read only a
+        prefix of a larger forum). Advancing the watermark then would claim a
+        completeness the bounded read did not achieve and would skip the unread older
+        topics on the next run, so the cursor is left where it was instead. Full
+        pagination — which would let the cap advance honestly — is deferred.
+        """
+        if self._truncated or self._watermark is None:
             return None
         return Cursor(value=self._watermark.isoformat())
 
@@ -107,6 +118,7 @@ class DiscourseConnector:
             return self._topic_cache
 
         self._observe(floor)
+        self._truncated = False
         paths = (
             [f"/tag/{tag}.json" for tag in self._settings.tags]
             if self._settings.tags
@@ -115,21 +127,23 @@ class DiscourseConnector:
         topics: list[dict[str, Any]] = []
         seen: set[int] = set()
         for path in paths:
-            listing = self._get(path)
-            for topic in listing.get("topic_list", {}).get("topics", []):
+            for topic in self._get(path).get("topic_list", {}).get("topics", []):
                 topic_id = int(topic["id"])
                 if topic_id in seen:
                     continue
                 bumped = _parse_value(topic.get("bumped_at") or topic.get("created_at"))
                 if floor is not None and bumped is not None and bumped <= floor:
                     continue
+                if len(topics) >= self._settings.max_topics:
+                    # A qualifying topic we cannot take: the read is bounded.
+                    self._truncated = True
+                    break
                 seen.add(topic_id)
                 self._observe(bumped)
                 topics.append(topic)
-            if len(topics) >= self._settings.max_topics:
+            if self._truncated:
                 break
 
-        topics = topics[: self._settings.max_topics]
         self._topic_cache = topics
         self._topic_cache_key = key
         return topics

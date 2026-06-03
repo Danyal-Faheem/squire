@@ -177,6 +177,46 @@ def test_cursor_advances_and_filters_incrementally() -> None:
     assert list(fresh.iter_signals(later)) == []
 
 
+def test_capped_read_does_not_advance_cursor() -> None:
+    """A run bounded by max_topics must not record a complete-backfill cursor.
+
+    Otherwise the unread older topics would be skipped forever on the next run. The
+    cap is honest: it advances the cursor only when it read everything available.
+    """
+    routes: dict[str, dict[str, Any]] = {
+        "/latest.json": {
+            "topic_list": {
+                "topics": [
+                    _topic(3, slug="c", title="C", tags=[]),
+                    _topic(2, slug="b", title="B", tags=[]),
+                    _topic(1, slug="a", title="A", tags=[]),
+                ]
+            }
+        },
+        "/t/3.json": _detail("newest topic"),
+    }
+    connector = DiscourseConnector(
+        ConnectorConfig(
+            key="discourse",
+            instance_id="forum",
+            settings={"base_url": "https://forum.example", "max_topics": 1},
+        ),
+        client=_FakeHttp(routes),
+    )
+
+    read = list(connector.iter_signals(None))
+
+    assert [s.title for s in read] == ["C"]  # only the newest was read
+    assert connector.current_cursor() is None  # ...so completion is not claimed
+
+
+def test_complete_read_advances_cursor() -> None:
+    """When the cap is not hit, the cursor advances normally for incremental polling."""
+    connector = _connector(_FakeHttp(_routes()), max_topics=50)
+    list(connector.iter_signals(None))
+    assert connector.current_cursor() is not None
+
+
 def test_signal_flows_through_the_same_factory() -> None:
     """A discourse signal is processed by the work-item factory just like github's."""
     connector = _connector(_FakeHttp(_routes()))
