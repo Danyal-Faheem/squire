@@ -23,6 +23,8 @@ from sqlalchemy.orm import Session
 from squire.board.base import Board
 from squire.board.github import GitHubBoard
 from squire.classify.llm import LLMClassifier
+from squire.commands.core import CommandCore
+from squire.commands.store import PgCommandStore
 from squire.common import models
 from squire.common.config import Settings, get_settings
 from squire.common.deployment import (
@@ -41,6 +43,9 @@ from squire.factory.store import PgTrackedItemStore
 from squire.factory.work_items import WorkItemFactory
 from squire.ingestion.cursors import PgCursorStore
 from squire.ingestion.orchestrator import IngestionOrchestrator, SignalHandler
+from squire.messaging.base import MessagingAdapter
+from squire.messaging.slack import SlackAdapter
+from squire.messaging.surface import MessagingSurface
 from squire.prompts import PromptLibrary
 from squire.rag.brain import Brain, ClassifierFn, default_classifier
 
@@ -165,6 +170,33 @@ class Runtime:
             )
             return None
         return _factory_signal_handler(factory)
+
+    def build_command_core(self, session: Session) -> CommandCore:
+        """Wire the surface-agnostic command core over a session.
+
+        Shared by the board and messaging surfaces: questions and context route to
+        the brain, open-pr is gated by ``AUTOPR_ENABLED`` and recorded.
+        """
+        return CommandCore(
+            querier=self.build_brain(session),
+            store=PgCommandStore(session),
+            autopr_enabled=self._settings.autopr_enabled,
+        )
+
+    def build_messaging_adapter(self) -> MessagingAdapter:
+        """Build the configured messaging adapter (Slack)."""
+        return SlackAdapter(bot_token=self._settings.slack_bot_token or None)
+
+    def build_messaging_surface(
+        self, session: Session, adapter: MessagingAdapter
+    ) -> MessagingSurface:
+        """Wire the messaging command surface over a session and an adapter."""
+        return MessagingSurface(
+            core=self.build_command_core(session),
+            adapter=adapter,
+            mention_handle=self._settings.bot_mention_handle,
+            pr_keyword=self._settings.agent_pr_keyword,
+        )
 
     def build_orchestrator(
         self, session: Session, *, signal_handler: SignalHandler | None = None

@@ -21,12 +21,14 @@ from squire.messaging.base import (
     request_approval,
 )
 from squire.messaging.digest import build_digest, publish_digest
+from squire.messaging.slack import SlackAdapter
 from squire.messaging.surface import MessagingSurface
 
 __all__ = [
     "PLAIN_TEXT_APPROVAL_HINT",
     "MessagingAdapter",
     "MessagingSurface",
+    "SlackAdapter",
     "SupportsRichApproval",
     "build_digest",
     "publish_digest",

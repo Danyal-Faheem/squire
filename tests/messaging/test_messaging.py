@@ -166,7 +166,7 @@ def test_messaging_returns_same_answer_as_board() -> None:
     board_adapter = _NoopBoard()
     board = BoardSurface(
         core=core,
-        board=board_adapter,  # type: ignore[arg-type]
+        board=board_adapter,
         mention_handle="@squire",
         pr_keyword="open-pr",
     )
