@@ -5,12 +5,14 @@ Three endpoints expose the brain's three jobs:
 
 * ``POST /query``   — retrieval plus a grounded, cited answer.
 * ``POST /draft``   — a grounded, cited reply drafted for a work item.
-* ``POST /classify``— a classification for a signal (trivial default until Phase 3).
+* ``POST /classify``— a classification for a signal, via the active classifier.
 
-The brain is supplied per request through the :func:`get_brain` dependency, which
-binds a vector store to a fresh database session and reuses the process-wide LLM and
-embedding clients. Tests override that one dependency to inject a brain wired to
-fakes, so the whole service runs offline without a database or any network call.
+The brain is supplied per request through the :func:`get_brain` dependency, which the
+composition root wires: it binds a vector store to a fresh database session, reuses the
+process-wide LLM and embedding clients, and selects the active classifier (the
+LLM-backed one when the deployment has a policy, the default otherwise). Tests override
+that one dependency to inject a brain wired to fakes, so the whole service runs offline
+without a database or any network call.
 """
 
 from __future__ import annotations

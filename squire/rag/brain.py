@@ -5,12 +5,12 @@
 retrieve relevant chunks and generate a grounded, cited answer from them. ``classify``
 delegates to an injected classifier function.
 
-Classification proper is a Phase 3 concern (the ``Classifier`` seam, which weighs a
-signal against a deployment's taxonomy and routing). Until that exists, the brain
-ships a trivial default that returns generic, project-agnostic placeholders. The
-delegation is a plain injectable callable, so the real classifier slots in by being
-passed to the brain — the ``/classify`` endpoint, which only calls ``brain.classify``,
-does not change.
+The classifier is a real seam (``squire.classify``): the composition root passes the
+LLM-backed classifier bound to a deployment's taxonomy and routing when one exists. The
+brain depends only on the callable shape, so which classifier is active is decided
+above it; when no classifier is supplied it uses the project-agnostic default below.
+The ``/classify`` endpoint only calls ``brain.classify``, so swapping the classifier
+never changes the endpoint.
 """
 
 from __future__ import annotations
@@ -25,18 +25,19 @@ from squire.rag.generator import Generator
 from squire.rag.retriever import Retriever
 from squire.rag.schemas import GroundedAnswer
 
-#: A classifier turns a signal into a classification. The Phase 3 ``Classifier`` seam
-#: will provide a real implementation; the brain only depends on this shape.
+#: A classifier turns a signal into a classification. The ``squire.classify``
+#: ``Classifier`` seam provides the real (LLM-backed) implementation; the brain depends
+#: only on this callable shape, and an LLMClassifier's ``classify`` method satisfies it.
 ClassifierFn = Callable[[Signal], Classification]
 
 
 def default_classifier(signal: Signal) -> Classification:
-    """The trivial built-in classifier used until the Phase 3 seam exists.
+    """The project-agnostic fallback classifier, used when no policy is configured.
 
-    It assigns generic, project-agnostic placeholders: no taxonomy, routing, or
-    priority scheme is known to the engine, so it cannot do better than this without
-    a deployment's configuration. It exists only so ``/classify`` is functional and
-    has a stable shape for the real classifier to replace.
+    It assigns generic placeholders: with no taxonomy, routing, or priority scheme
+    configured, the engine cannot do better. The composition root uses it only when a
+    deployment has no policy yet; once a policy exists, the LLM-backed classifier from
+    the ``Classifier`` seam takes its place.
     """
     return Classification(
         category="uncategorized",
